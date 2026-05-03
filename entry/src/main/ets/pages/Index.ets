@@ -4,20 +4,28 @@ import { RagApi } from '../api/RagApi';
 import { FilePickerUtil } from '../utils/FilePickerUtil';
 import {
   PickedDocument,
+  SummaryRequest,
   SummaryResponse,
-  ChatResponse
+  ChatRequest,
+  ChatResponse,
+  SourceChunk
 } from '../model/Types';
+
+interface DocumentItem {
+  name: string;
+  text: string;
+}
 
 @Entry
 @Component
 struct Index {
-  @State documents: Array<{ name: string; text: string }> = [];
+  @State documents: DocumentItem[] = new Array<DocumentItem>();
 
   @State selectedLength: string = 'medium';
 
   @State summaryText: string = '';
-  @State keyPoints: string[] = [];
-  @State studyQuestions: string[] = [];
+  @State keyPoints: string[] = new Array<string>();
+  @State studyQuestions: string[] = new Array<string>();
 
   @State question: string = '';
   @State answer: string = '';
@@ -25,6 +33,20 @@ struct Index {
 
   @State statusText: string = '';
   @State isLoading: boolean = false;
+
+  private errorToString(err: Object): string {
+    return `${err}`;
+  }
+
+  private buildDocumentTextList(): string[] {
+    const texts: string[] = new Array<string>();
+
+    for (let i = 0; i < this.documents.length; i++) {
+      texts.push(this.documents[i].text);
+    }
+
+    return texts;
+  }
 
   private async selectAndProcessPdf(): Promise<void> {
     const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
@@ -38,17 +60,38 @@ struct Index {
       this.statusText = `Processing ${pickedFile.name}...`;
       const text: string = await RagApi.extractPdfText(pickedFile);
 
-      this.documents = [...this.documents, { name: pickedFile.name, text: text }];
+      const newDocument: DocumentItem = {
+        name: pickedFile.name,
+        text: text
+      };
+
+      const nextDocuments: DocumentItem[] = new Array<DocumentItem>();
+
+      for (let i = 0; i < this.documents.length; i++) {
+        nextDocuments.push(this.documents[i]);
+      }
+
+      nextDocuments.push(newDocument);
+      this.documents = nextDocuments;
+
       this.statusText = `Processed: ${pickedFile.name}`;
     } catch (err) {
-      this.statusText = `Failed: ${JSON.stringify(err)}`;
+      this.statusText = `Failed: ${this.errorToString(err as Object)}`;
     } finally {
       this.isLoading = false;
     }
   }
 
   private removeDocument(index: number): void {
-    this.documents = this.documents.filter((_, i) => i !== index);
+    const nextDocuments: DocumentItem[] = new Array<DocumentItem>();
+
+    for (let i = 0; i < this.documents.length; i++) {
+      if (i !== index) {
+        nextDocuments.push(this.documents[i]);
+      }
+    }
+
+    this.documents = nextDocuments;
   }
 
   private async generateSummary(): Promise<void> {
@@ -61,17 +104,20 @@ struct Index {
     this.summaryText = '';
 
     try {
-      const texts: string[] = this.documents.map(d => d.text);
-      const result: SummaryResponse = await RagApi.summarize({
-        documentIds: [],
+      const documentIds: string[] = new Array<string>();
+
+      const req: SummaryRequest = {
+        documentIds: documentIds,
         length: this.selectedLength
-      }, texts);
+      };
+
+      const result: SummaryResponse = await RagApi.summarize(req, this.buildDocumentTextList());
 
       this.summaryText = result.summary;
       this.keyPoints = result.keyPoints;
       this.studyQuestions = result.studyQuestions;
     } catch (err) {
-      this.summaryText = `Failed to generate summary: ${JSON.stringify(err)}`;
+      this.summaryText = `Failed to generate summary: ${this.errorToString(err as Object)}`;
     } finally {
       this.isLoading = false;
     }
@@ -93,18 +139,27 @@ struct Index {
     this.sourcesText = '';
 
     try {
-      const texts: string[] = this.documents.map(d => d.text);
-      const result: ChatResponse = await RagApi.chat({
-        documentIds: [],
+      const documentIds: string[] = new Array<string>();
+
+      const req: ChatRequest = {
+        documentIds: documentIds,
         question: this.question
-      }, texts);
+      };
+
+      const result: ChatResponse = await RagApi.chat(req, this.buildDocumentTextList());
 
       this.answer = result.answer;
-      this.sourcesText = result.sources
-        .map((source) => `${source.documentTitle}, page ${source.page}: ${source.text}`)
-        .join('\n\n');
+
+      const sourceLines: string[] = new Array<string>();
+
+      for (let i = 0; i < result.sources.length; i++) {
+        const source: SourceChunk = result.sources[i];
+        sourceLines.push(`${source.documentTitle}, page ${source.page}: ${source.text}`);
+      }
+
+      this.sourcesText = sourceLines.join('\n\n');
     } catch (err) {
-      this.answer = `Failed to answer question: ${JSON.stringify(err)}`;
+      this.answer = `Failed to answer question: ${this.errorToString(err as Object)}`;
     } finally {
       this.isLoading = false;
     }
@@ -174,34 +229,40 @@ struct Index {
           .margin({ top: 12 })
       } else {
         List() {
-          ForEach(this.documents, (doc: { name: string; text: string }, index: number) => {
-            ListItem() {
-              Row() {
-                Column() {
-                  Text(doc.name)
-                    .fontSize(16)
-                    .fontWeight(FontWeight.Medium)
+          ForEach(
+            this.documents,
+            (doc: DocumentItem, index: number) => {
+              ListItem() {
+                Row() {
+                  Column() {
+                    Text(doc.name)
+                      .fontSize(16)
+                      .fontWeight(FontWeight.Medium)
 
-                  Text(`${doc.text.length} characters`)
-                    .fontSize(13)
-                    .fontColor('#666666')
+                    Text(`${doc.text.length} characters`)
+                      .fontSize(13)
+                      .fontColor('#666666')
+                  }
+                  .flexGrow(1)
+
+                  Button('Remove')
+                    .height(32)
+                    .backgroundColor('#FF3B30')
+                    .onClick(() => {
+                      this.removeDocument(index);
+                    })
                 }
-                .flexGrow(1)
-
-                Button('Remove')
-                  .height(32)
-                  .backgroundColor('#FF3B30')
-                  .onClick(() => {
-                    this.removeDocument(index);
-                  })
+                .padding(12)
+                .width('100%')
+                .backgroundColor(Color.White)
+                .borderRadius(12)
+                .margin({ bottom: 8 })
               }
-              .padding(12)
-              .width('100%')
-              .backgroundColor(Color.White)
-              .borderRadius(12)
-              .margin({ bottom: 8 })
+            },
+            (doc: DocumentItem, index: number): string => {
+              return `${index}-${doc.name}`;
             }
-          })
+          )
         }
         .width('100%')
       }
@@ -219,19 +280,27 @@ struct Index {
 
       Row() {
         Button('Short')
-          .onClick(() => this.selectedLength = 'short')
+          .onClick(() => {
+            this.selectedLength = 'short';
+          })
 
         Button('Medium')
           .margin({ left: 8 })
-          .onClick(() => this.selectedLength = 'medium')
+          .onClick(() => {
+            this.selectedLength = 'medium';
+          })
 
         Button('Long')
           .margin({ left: 8 })
-          .onClick(() => this.selectedLength = 'long')
+          .onClick(() => {
+            this.selectedLength = 'long';
+          })
 
         Button('Detailed')
           .margin({ left: 8 })
-          .onClick(() => this.selectedLength = 'detailed')
+          .onClick(() => {
+            this.selectedLength = 'detailed';
+          })
       }
       .margin({ bottom: 12 })
 
@@ -260,11 +329,17 @@ struct Index {
               .fontWeight(FontWeight.Bold)
               .margin({ bottom: 8 })
 
-            ForEach(this.keyPoints, (point: string) => {
-              Text(`• ${point}`)
-                .fontSize(15)
-                .margin({ bottom: 6 })
-            })
+            ForEach(
+              this.keyPoints,
+              (point: string) => {
+                Text(`• ${point}`)
+                  .fontSize(15)
+                  .margin({ bottom: 6 })
+              },
+              (point: string, index: number): string => {
+                return `${index}-${point}`;
+              }
+            )
           }
 
           if (this.studyQuestions.length > 0) {
@@ -273,11 +348,17 @@ struct Index {
               .fontWeight(FontWeight.Bold)
               .margin({ top: 16, bottom: 8 })
 
-            ForEach(this.studyQuestions, (q: string) => {
-              Text(`• ${q}`)
-                .fontSize(15)
-                .margin({ bottom: 6 })
-            })
+            ForEach(
+              this.studyQuestions,
+              (q: string) => {
+                Text(`• ${q}`)
+                  .fontSize(15)
+                  .margin({ bottom: 6 })
+              },
+              (q: string, index: number): string => {
+                return `${index}-${q}`;
+              }
+            )
           }
         }
       }
