@@ -2,6 +2,18 @@ export interface UploadedDocument {
   documentId: string;
   title: string;
   pageCount: number;
+  status: string;
+  progress: number;
+}
+
+export interface DocumentStatusResponse {
+  documentId: string;
+  title: string;
+  pageCount: number;
+  chunkCount: number;
+  status: string;
+  progress: number;
+  error: string;
 }
 
 export interface PickedDocument {

@@ -7,41 +7,65 @@ import { PickedDocument } from '../model/Types';
 export class FilePickerUtil {
   static async pickPdf(context: common.UIAbilityContext): Promise<PickedDocument> {
     const documentSelectOptions = new picker.DocumentSelectOptions();
-
     documentSelectOptions.maxSelectNumber = 1;
     documentSelectOptions.fileSuffixFilters = ['.pdf'];
 
     const documentViewPicker = new picker.DocumentViewPicker(context);
 
+    let uris: Array<string>;
+
     try {
-      const uris: Array<string> = await documentViewPicker.select(documentSelectOptions);
-
-      if (uris.length === 0) {
-        throw new Error('No file selected.');
-      }
-
-      const uri: string = uris[0];
-
-      return {
-        uri: uri,
-        name: FilePickerUtil.guessFileName(uri),
-        mimeType: 'application/pdf'
-      };
+      uris = await documentViewPicker.select(documentSelectOptions);
     } catch (err) {
-      const businessErr = err as BusinessError;
-      throw new Error(`File picker failed. code=${businessErr.code}, message=${businessErr.message}`);
+      throw new Error(`Document picker select failed: ${FilePickerUtil.formatError(err as Object)}`);
     }
+
+    if (uris.length === 0) {
+      throw new Error('No file selected.');
+    }
+
+    const selectedUri: string = uris[0];
+    const fileName: string = FilePickerUtil.guessFileName(selectedUri);
+
+    console.info(`[FilePickerUtil] selectedUri=${selectedUri}`);
+    console.info(`[FilePickerUtil] fileName=${fileName}`);
+
+    return {
+      uri: selectedUri,
+      name: fileName,
+      mimeType: 'application/pdf'
+    };
   }
 
   private static guessFileName(uri: string): string {
-    const cleanUri = decodeURIComponent(uri);
-    const parts: string[] = cleanUri.split('/');
-    let name: string = parts.length > 0 ? parts[parts.length - 1] : '';
+    let text: string = uri;
 
-    if (name.length === 0 || name.indexOf('.') < 0) {
-      name = `document_${Date.now()}.pdf`;
+    const queryIndex: number = text.indexOf('?');
+    if (queryIndex >= 0) {
+      text = text.substring(0, queryIndex);
     }
 
-    return name.replace(/["\r\n]/g, '_');
+    const slashIndex: number = text.lastIndexOf('/');
+    let name: string = slashIndex >= 0 ? text.substring(slashIndex + 1) : text;
+
+    try {
+      name = decodeURIComponent(name);
+    } catch (err) {
+    }
+
+    if (name.length === 0 || !name.toLowerCase().endsWith('.pdf')) {
+      return `picked_${Date.now()}.pdf`;
+    }
+
+    return name;
+  }
+
+  private static formatError(err: Object): string {
+    const businessErr = err as BusinessError;
+
+    const codeText: string = businessErr.code === undefined ? 'undefined' : businessErr.code.toString();
+    const messageText: string = businessErr.message === undefined ? String(err) : businessErr.message;
+
+    return `code=${codeText}, message=${messageText}`;
   }
 }
